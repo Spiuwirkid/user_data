@@ -1,36 +1,55 @@
 #!/bin/bash
+
+# Pastikan script berhenti jika ada perintah yang gagal
+set -e
+
+# Update paket dan instal dependensi dasar
 apt-get update -y
 apt-get install -y nginx git curl unzip
 
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+# --- Instal Node.js dan NPM via NodeSource (lebih robust untuk User Data) ---
+# Tambahkan repository NodeSource
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
 
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+# Instal Node.js
+apt-get install -y nodejs
 
-nvm install 22
-nvm use 22
-
+# Instal PM2 secara global
 npm install -g pm2
 
+# --- Persiapan Direktori Aplikasi dan Kloning Repo ---
+# Pastikan direktori dimiliki oleh user 'ubuntu' dari awal
 mkdir -p /home/ubuntu/app
-git clone https://github.com/Spiuwirkid/ExpressJS-APP.git /home/ubuntu/app/ExpressJS-APP
+chown ubuntu:ubuntu /home/ubuntu/app
+chmod 755 /home/ubuntu/app # Pastikan izin yang sesuai
+
+# Kloning repo sebagai user 'ubuntu' (lebih aman dan benar hak aksesnya)
+# Pastikan user 'ubuntu' bisa mengakses git dan npm
+sudo -u ubuntu git clone https://github.com/Spiuwirkid/ExpressJS-APP.git /home/ubuntu/app/ExpressJS-APP
+
+# Masuk ke direktori aplikasi
 cd /home/ubuntu/app/ExpressJS-APP
 
-npm install
+# Instal dependensi Node.js sebagai user 'ubuntu'
+sudo -u ubuntu npm install
 
-chown -R ubuntu:ubuntu /home/ubuntu/app/ExpressJS-APP
+# --- Konfigurasi PM2 ---
+# Jalankan aplikasi dengan PM2 sebagai user 'ubuntu'
+# Beri nama aplikasi agar mudah diidentifikasi
+sudo -u ubuntu pm2 start app.js --name "lks-jabar-app"
+sudo -u ubuntu pm2 save
 
-pm2 start app.js --name "lks-jabar-app"
-pm2 save
-pm2 startup systemd -u ubuntu --hp /home/ubuntu
+# Siapkan PM2 startup otomatis sebagai user 'ubuntu'
+# Ini akan membuat unit systemd yang memastikan PM2 dan aplikasinya berjalan saat boot
+pm2 startup systemd -u ubuntu --hp /home/ubuntu # Ini akan dijalankan oleh root, tapi akan set PM2 di user ubuntu
 
+# --- Konfigurasi Nginx ---
 cat <<'EOF' > /etc/nginx/sites-available/LKS-JABAR
 server {
     listen 80;
     listen [::]:80;
 
-    server_name _;
+    server_name _; # Ganti dengan nama domain Anda, misal: example.com www.example.com
 
     location / {
         proxy_pass http://localhost:3000;
@@ -43,9 +62,12 @@ server {
 }
 EOF
 
+# Aktifkan konfigurasi Nginx baru dan hapus default
 ln -s /etc/nginx/sites-available/LKS-JABAR /etc/nginx/sites-enabled/LKS-JABAR
-rm -f /etc/nginx/sites-enabled/default # Gunakan -f untuk menghindari error jika file tidak ada
+rm -f /etc/nginx/sites-enabled/default
 
-# Uji konfigurasi Nginx dan reload/restart
+# Uji konfigurasi Nginx dan muat ulang/restart layanan
 nginx -t && systemctl reload nginx
-systemctl restart nginx # Restart juga tidak masalah, memastikan semua bersih
+systemctl restart nginx
+
+echo "Server setup complete!"
