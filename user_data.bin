@@ -3,7 +3,7 @@ apt-get update -y
 apt-get install -y nginx git curl unzip
 
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-\. "$HOME/.nvm/nvm.sh"
+. "$HOME/.nvm/nvm.sh"
 nvm install 22
 nvm use 22
 
@@ -12,21 +12,21 @@ npm install -g pm2
 mkdir -p /home/ubuntu/app
 cd /home/ubuntu/app
 
-curl -o lks-app.zip https://your-bucket-or-your-server.com/path-to/lks-app.zip
+curl -o lks-app.zip
 
+# Extract app
 unzip lks-app.zip
 npm install
 
 pm2 start app.js
 pm2 save
-
 pm2 startup systemd -u ubuntu --hp /home/ubuntu
 pm2 save
 
-cat <<'EOF' > /etc/nginx/sites-available/default
+cat <<'EOF' > /etc/nginx/sites-available/LKS-JABAR
 server {
-    listen 80 default_server;
-    listen [::]:80 default_server;
+    listen 80;
+    listen [::]:80;
 
     server_name _;
 
@@ -41,4 +41,8 @@ server {
 }
 EOF
 
-nginx -t && systemctl restart nginx
+ln -s /etc/nginx/sites-available/LKS-JABAR /etc/nginx/sites-enabled/LKS-JABAR
+
+rm /etc/nginx/sites-enabled/default
+
+nginx -t && systemctl reload nginx
