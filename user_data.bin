@@ -7,29 +7,22 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 nvm install 22
 nvm use 22
 
-# Install PM2 globally
 npm install -g pm2
 
-# Setup app folder
 mkdir -p /home/ubuntu/app
 cd /home/ubuntu/app
 
-# Download app ZIP from link → GANTI LINK INI SESUAI LKS PAS LOMBA
 curl -o lks-app.zip https://your-bucket-or-your-server.com/path-to/lks-app.zip
 
-# Extract app
 unzip lks-app.zip
 npm install
 
-# Start app with PM2
 pm2 start app.js
 pm2 save
 
-# Setup PM2 startup (auto start on reboot)
 pm2 startup systemd -u ubuntu --hp /home/ubuntu
 pm2 save
 
-# Configure Nginx reverse proxy
 cat <<'EOF' > /etc/nginx/sites-available/default
 server {
     listen 80 default_server;
@@ -48,5 +41,4 @@ server {
 }
 EOF
 
-# Test Nginx config and restart
 nginx -t && systemctl restart nginx
