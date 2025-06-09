@@ -1,73 +1,82 @@
 #!/bin/bash
+# === Update & Install Dependencies ===
+yum update -y
+amazon-linux-extras enable nginx1
+yum install -y nginx git curl unzip
+curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+yum install -y nodejs
 
-# Pastikan script berhenti jika ada perintah yang gagal
-set -e
-
-# Update paket dan instal dependensi dasar
-apt-get update -y
-apt-get install -y nginx git curl unzip
-
-# --- Instal Node.js dan NPM via NodeSource (lebih robust untuk User Data) ---
-# Tambahkan repository NodeSource
-curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-
-# Instal Node.js
-apt-get install -y nodejs
-
-# Instal PM2 secara global
+# === Install PM2 globally ===
 npm install -g pm2
 
-# --- Persiapan Direktori Aplikasi dan Kloning Repo ---
-# Pastikan direktori dimiliki oleh user 'ubuntu' dari awal
-mkdir -p /home/ubuntu/app
-chown ubuntu:ubuntu /home/ubuntu/app
-chmod 755 /home/ubuntu/app # Pastikan izin yang sesuai
+# === Clone Express App (Pastikan ganti URL git repo atau salin kode ke bawah) ===
+cd /home/ec2-user
+git clone https://github.com/yourusername/lks-web-app.git
+cd lks-web-app
+npm install
 
-# Kloning repo sebagai user 'ubuntu' (lebih aman dan benar hak aksesnya)
-# Pastikan user 'ubuntu' bisa mengakses git dan npm
-sudo -u ubuntu git clone https://github.com/Spiuwirkid/ExpressJS-APP.git /home/ubuntu/app/ExpressJS-APP
+# === Start Express App with PM2 ===
+pm2 start app.js
+pm2 startup systemd -u ec2-user --hp /home/ec2-user
+pm2 save
 
-# Masuk ke direktori aplikasi
-cd /home/ubuntu/app/ExpressJS-APP
+# === Konfigurasi NGINX ===
+cat > /etc/nginx/nginx.conf <<EOF
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log;
+pid /run/nginx.pid;
 
-# Instal dependensi Node.js sebagai user 'ubuntu'
-sudo -u ubuntu npm install
+events {
+    worker_connections 1024;
+}
 
-# --- Konfigurasi PM2 ---
-# Jalankan aplikasi dengan PM2 sebagai user 'ubuntu'
-# Beri nama aplikasi agar mudah diidentifikasi
-sudo -u ubuntu pm2 start app.js --name "lks-jabar-app"
-sudo -u ubuntu pm2 save
+http {
+    log_format main '\$remote_addr - \$remote_user [\$time_local] "\$request" '
+                    '\$status \$body_bytes_sent "\$http_referer" '
+                    '"\$http_user_agent" "\$http_x_forwarded_for"';
 
-# Siapkan PM2 startup otomatis sebagai user 'ubuntu'
-# Ini akan membuat unit systemd yang memastikan PM2 dan aplikasinya berjalan saat boot
-pm2 startup systemd -u ubuntu --hp /home/ubuntu # Ini akan dijalankan oleh root, tapi akan set PM2 di user ubuntu
+    access_log /var/log/nginx/access.log main;
 
-# --- Konfigurasi Nginx ---
-cat <<'EOF' > /etc/nginx/sites-available/LKS-JABAR
-server {
-    listen 80;
-    listen [::]:80;
+    sendfile            on;
+    tcp_nopush          on;
+    keepalive_timeout   65;
+    types_hash_max_size 2048;
 
-    server_name _; # Ganti dengan nama domain Anda, misal: example.com www.example.com
+    include             /etc/nginx/mime.types;
+    default_type        application/octet-stream;
 
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_cache_bypass $http_upgrade;
+    include /etc/nginx/conf.d/*.conf;
+
+    server {
+        listen 80 default_server;
+        server_name _;
+
+        location / {
+            proxy_pass http://localhost:3000;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade \$http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host \$host;
+            proxy_cache_bypass \$http_upgrade;
+        }
     }
 }
 EOF
 
-# Aktifkan konfigurasi Nginx baru dan hapus default
-ln -s /etc/nginx/sites-available/LKS-JABAR /etc/nginx/sites-enabled/LKS-JABAR
-rm -f /etc/nginx/sites-enabled/default
+# === Start & Enable NGINX ===
+systemctl enable nginx
+systemctl start nginx
 
-# Uji konfigurasi Nginx dan muat ulang/restart layanan
-nginx -t && systemctl reload nginx
-systemctl restart nginx
+# === Install AWS CLI v2 (for log upload to S3) ===
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+./aws/install
 
-echo "Server setup complete!"
+# === Setup Log Upload Cronjob ===
+cat >> /var/spool/cron/root <<EOF
+0 0 * * * /usr/local/bin/aws s3 cp /var/log/nginx/access.log s3://lks-nginx-log-bucket/access-\$(date +\%F).log
+0 0 * * * /usr/local/bin/aws s3 cp /var/log/nginx/error.log s3://lks-nginx-log-bucket/error-\$(date +\%F).log
+EOF
+
+# === End of script ===
